@@ -17,7 +17,7 @@ def parse_args():
     # Input options - either single video or folder
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--video_path", type=str, help="Path to a single video file")
-    input_group.add_argument("--input_folder", type=str, help="Path to folder containing mp4 files for batch processing")
+    input_group.add_argument("--input_folder", type=str, help="Path to folder containing video files for batch processing")
     
     parser.add_argument("--output_path", type=str, help="Path to save the translation text (for single file) or output folder (for batch processing)")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-Omni-7B", help="Path to the model")
@@ -28,29 +28,43 @@ def parse_args():
     parser.add_argument("--use_flash_attn", action="store_true", help="Use Flash Attention 2 for faster inference")
     return parser.parse_args()
 
-def get_mp4_files(folder_path):
+def get_video_files(folder_path):
     """
-    Get all mp4 files from the specified folder
+    Get all video files from the specified folder
     
     Args:
-        folder_path: Path to the folder containing mp4 files
+        folder_path: Path to the folder containing video files
         
     Returns:
-        List of mp4 file paths
+        List of video file paths
     """
     folder_path = Path(folder_path)
     if not folder_path.exists():
         raise FileNotFoundError(f"Folder not found: {folder_path}")
     
-    # Find all mp4 files (case insensitive)
-    mp4_files = []
-    for pattern in ['*.mp4', '*.MP4', '*.Mp4', '*.mP4']:
-        mp4_files.extend(glob.glob(str(folder_path / pattern)))
+    # Find all video files (common formats, case insensitive)
+    video_extensions = [
+        '*.mp4', '*.MP4', '*.Mp4', '*.mP4',
+        '*.avi', '*.AVI', '*.Avi', '*.aVi',
+        '*.mov', '*.MOV', '*.Mov', '*.mOv',
+        '*.mkv', '*.MKV', '*.Mkv', '*.mKv',
+        '*.wmv', '*.WMV', '*.Wmv', '*.wMv',
+        '*.flv', '*.FLV', '*.Flv', '*.fLv',
+        '*.webm', '*.WEBM', '*.Webm', '*.wEbm',
+        '*.m4v', '*.M4V', '*.M4v', '*.m4V',
+        '*.3gp', '*.3GP', '*.3Gp', '*.3gP'
+    ]
     
-    if not mp4_files:
-        raise ValueError(f"No mp4 files found in folder: {folder_path}")
+    video_files = []
+    for pattern in video_extensions:
+        video_files.extend(glob.glob(str(folder_path / pattern)))
     
-    return sorted(mp4_files)
+    if not video_files:
+        print(f"Warning: No video files found in folder: {folder_path}")
+        print("Supported formats: mp4, avi, mov, mkv, wmv, flv, webm, m4v, 3gp")
+        return []
+    
+    return sorted(video_files)
 
 def translate_video(video_path, model_path, source_lang="auto", target_lang="en", 
                    use_audio=True, save_audio=False, use_flash_attn=False):
@@ -116,7 +130,7 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
             "role": "user",
             "content": [
                 {"type": "video", "video": video_path},
-                {"type": "text", "text": f"翻译提供的视频到中文。只需要输出翻译内容原文，不要输出任何解释。"}
+                {"type": "text", "text": f"翻译提供的视频中的说话内容到中文。只需要输出翻译内容原文，不要输出任何解释。"}
             ],
         },
     ]
@@ -193,8 +207,13 @@ def main():
     else:
         # Batch processing
         print(f"Starting batch processing for folder: {args.input_folder}")
-        mp4_files = get_mp4_files(args.input_folder)
-        print(f"Found {len(mp4_files)} mp4 files to process")
+        video_files = get_video_files(args.input_folder)
+        
+        if not video_files:
+            print("No video files found to process. Exiting.")
+            return
+            
+        print(f"Found {len(video_files)} video files to process")
         
         # Set default output folder if not provided
         if not args.output_path:
@@ -204,14 +223,14 @@ def main():
         os.makedirs(args.output_path, exist_ok=True)
         
         # Process each video file
-        for i, mp4_file in enumerate(mp4_files, 1):
+        for i, video_file in enumerate(video_files, 1):
             print(f"\n{'='*60}")
-            print(f"Processing file {i}/{len(mp4_files)}: {os.path.basename(mp4_file)}")
+            print(f"Processing file {i}/{len(video_files)}: {os.path.basename(video_file)}")
             print(f"{'='*60}")
             
             try:
                 translation = translate_video(
-                    mp4_file,
+                    video_file,
                     args.model_path,
                     args.source_lang,
                     args.target_lang,
@@ -221,7 +240,7 @@ def main():
                 )
                 
                 # Generate output filename based on input filename
-                video_name = Path(mp4_file).stem
+                video_name = Path(video_file).stem
                 output_filename = f"{video_name}.txt"
                 output_path = os.path.join(args.output_path, output_filename)
                 
@@ -233,7 +252,7 @@ def main():
                 print(f"Translation preview: {translation[:100]}...")
                 
             except Exception as e:
-                print(f"✗ Error processing {mp4_file}: {str(e)}")
+                print(f"✗ Error processing {video_file}: {str(e)}")
                 continue
         
         print(f"\n{'='*60}")
