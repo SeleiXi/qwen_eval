@@ -3,6 +3,7 @@ import argparse
 import torch
 import soundfile as sf
 from pathlib import Path
+import glob
 
 from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
 from qwen_omni_utils import process_mm_info
@@ -12,8 +13,13 @@ from qwen_omni_utils import process_mm_info
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Qwen2.5-Omni Video Translation")
-    parser.add_argument("--video_path", type=str, default="./evaluation/test_data/videos/test.mp4",required=True, help="Path to the video file")
-    parser.add_argument("--output_path", type=str, default="./evaluation/test_data/qwen_result.txt", help="Path to save the translation text")
+    
+    # Input options - either single video or folder
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--video_path", type=str, help="Path to a single video file")
+    input_group.add_argument("--input_folder", type=str, help="Path to folder containing mp4 files for batch processing")
+    
+    parser.add_argument("--output_path", type=str, help="Path to save the translation text (for single file) or output folder (for batch processing)")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-Omni-7B", help="Path to the model")
     parser.add_argument("--source_lang", type=str, default="auto", help="Source language (auto for auto-detection)")
     parser.add_argument("--target_lang", type=str, default="en", help="Target language (en, zh, etc.)")
@@ -21,6 +27,30 @@ def parse_args():
     parser.add_argument("--save_audio", action="store_true", help="Save audio output")
     parser.add_argument("--use_flash_attn", action="store_true", help="Use Flash Attention 2 for faster inference")
     return parser.parse_args()
+
+def get_mp4_files(folder_path):
+    """
+    Get all mp4 files from the specified folder
+    
+    Args:
+        folder_path: Path to the folder containing mp4 files
+        
+    Returns:
+        List of mp4 file paths
+    """
+    folder_path = Path(folder_path)
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
+    
+    # Find all mp4 files (case insensitive)
+    mp4_files = []
+    for pattern in ['*.mp4', '*.MP4', '*.Mp4', '*.mP4']:
+        mp4_files.extend(glob.glob(str(folder_path / pattern)))
+    
+    if not mp4_files:
+        raise ValueError(f"No mp4 files found in folder: {folder_path}")
+    
+    return sorted(mp4_files)
 
 def translate_video(video_path, model_path, source_lang="auto", target_lang="en", 
                    use_audio=True, save_audio=False, use_flash_attn=False):
@@ -127,33 +157,89 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
 def main():
     args = parse_args()
     
-    # Check if video exists
-    if not os.path.exists(args.video_path):
-        raise FileNotFoundError(f"Video file not found: {args.video_path}")
-    
-    # Create output directory if needed
-    os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
-    
-    # Translate video
-    translation = translate_video(
-        args.video_path, 
-        args.model_path, 
-        args.source_lang, 
-        args.target_lang,
-        args.use_audio,
-        args.save_audio,
-        args.use_flash_attn
-    )
-    
-    # Save translation to file
-    with open(args.output_path, "w", encoding="utf-8") as f:
-        f.write(translation)
-    
-    print(f"Translation saved to {args.output_path}")
-    print("\nTranslation result:")
-    print("-" * 50)
-    print(translation)
-    print("-" * 50)
+    if args.video_path:
+        # Single video processing
+        if not os.path.exists(args.video_path):
+            raise FileNotFoundError(f"Video file not found: {args.video_path}")
+        
+        # Set default output path if not provided
+        if not args.output_path:
+            args.output_path = "./evaluation/test_data/qwen_result.txt"
+        
+        # Create output directory if needed
+        os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
+        
+        # Translate video
+        translation = translate_video(
+            args.video_path, 
+            args.model_path, 
+            args.source_lang, 
+            args.target_lang,
+            args.use_audio,
+            args.save_audio,
+            args.use_flash_attn
+        )
+        
+        # Save translation to file
+        with open(args.output_path, "w", encoding="utf-8") as f:
+            f.write(translation)
+        
+        print(f"Translation saved to {args.output_path}")
+        print("\nTranslation result:")
+        print("-" * 50)
+        print(translation)
+        print("-" * 50)
+        
+    else:
+        # Batch processing
+        print(f"Starting batch processing for folder: {args.input_folder}")
+        mp4_files = get_mp4_files(args.input_folder)
+        print(f"Found {len(mp4_files)} mp4 files to process")
+        
+        # Set default output folder if not provided
+        if not args.output_path:
+            args.output_path = "./evaluation/test_data/batch_results"
+        
+        # Create output directory
+        os.makedirs(args.output_path, exist_ok=True)
+        
+        # Process each video file
+        for i, mp4_file in enumerate(mp4_files, 1):
+            print(f"\n{'='*60}")
+            print(f"Processing file {i}/{len(mp4_files)}: {os.path.basename(mp4_file)}")
+            print(f"{'='*60}")
+            
+            try:
+                translation = translate_video(
+                    mp4_file,
+                    args.model_path,
+                    args.source_lang,
+                    args.target_lang,
+                    args.use_audio,
+                    args.save_audio,
+                    args.use_flash_attn
+                )
+                
+                # Generate output filename based on input filename
+                video_name = Path(mp4_file).stem
+                output_filename = f"{video_name}_translation.txt"
+                output_path = os.path.join(args.output_path, output_filename)
+                
+                # Save translation to file
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(translation)
+                
+                print(f"✓ Translation saved to {output_path}")
+                print(f"Translation preview: {translation[:100]}...")
+                
+            except Exception as e:
+                print(f"✗ Error processing {mp4_file}: {str(e)}")
+                continue
+        
+        print(f"\n{'='*60}")
+        print(f"Batch processing completed!")
+        print(f"Results saved in: {args.output_path}")
+        print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()
