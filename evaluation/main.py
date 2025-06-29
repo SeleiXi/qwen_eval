@@ -60,7 +60,22 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
     if source_lang != "auto":
         lang_instruction = f"from {source_lang} "
     
-    conversation = [
+    # conversation = [
+    #     {
+    #         "role": "system",
+    #         "content": [
+    #             {"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}
+    #         ],
+    #     },
+    #     {
+    #         "role": "user",
+    #         "content": [
+    #             {"type": "video", "video": video_path},
+    #             {"type": "text", "text": f"Please translate all spoken content {lang_instruction}to {target_lang}. Provide the translation only without any explanations."}
+    #         ],
+    #     },
+    # ]
+        conversation = [
         {
             "role": "system",
             "content": [
@@ -71,7 +86,7 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
             "role": "user",
             "content": [
                 {"type": "video", "video": video_path},
-                {"type": "text", "text": f"Please translate all spoken content {lang_instruction}to {target_lang}. Provide the translation only without any explanations."}
+                {"type": "text", "text": f"翻译提供的视频到中文。只需要输出翻译内容原文，不要输出任何解释。"}
             ],
         },
     ]
