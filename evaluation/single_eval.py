@@ -75,7 +75,7 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
     #         ],
     #     },
     # ]
-        conversation = [
+    conversation = [
         {
             "role": "system",
             "content": [

@@ -183,6 +183,9 @@ def main():
         # Create output directory if needed
         os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
         
+        # python evaluation/main.py --video_path ./evaluation/test_data/videos/-oT9mgPKLRA_03.mp4
+
+
         # Translate video
         translation = translate_video(
             args.video_path, 
