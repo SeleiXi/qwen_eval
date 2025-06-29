@@ -105,7 +105,7 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
     #         ],
     #     },
     # ]
-        conversation = [
+    conversation = [
         {
             "role": "system",
             "content": [
@@ -222,7 +222,7 @@ def main():
                 
                 # Generate output filename based on input filename
                 video_name = Path(mp4_file).stem
-                output_filename = f"{video_name}_translation.txt"
+                output_filename = f"{video_name}.txt"
                 output_path = os.path.join(args.output_path, output_filename)
                 
                 # Save translation to file
