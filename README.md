@@ -20,6 +20,11 @@ nohup python evaluation/main.py --input_folder "/home/ubuntu/data/BigVideo-test/
 nohup python evaluation/main_reverse.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/reverse.log --use_audio &
 ```
 
+Faster Main
+```bash
+python evaluation/batch_parallel_translate.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" --shared_model --parallel_workers 10
+```
+
 __Recursive Translate__
 ``` bash
 python evaluation/recursive_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/dovebench_result" --use_audio 
