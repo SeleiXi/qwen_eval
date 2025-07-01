@@ -16,13 +16,15 @@ __Main.py__
 ``` bash
 nohup python evaluation/main.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/output.log --use_audio &
 ```
+
+reversed_version
 ``` bash
-nohup python evaluation/main_reverse.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/reverse.log --use_audio &
+python evaluation/main_reverse.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result"  --parallel_workers 20
 ```
 
 __batch processing Main__
 ```bash
-python evaluation/batch_parallel_translate.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" --shared_model --parallel_workers 10
+python evaluation/batch_parallel_translate.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/main_result" --shared_model --use_audio --parallel_workers 50
 ```
 
 __Recursive Translate__
@@ -33,9 +35,13 @@ python evaluation/recursive_translate.py --input_folder "/home/ubuntu/data/DoveB
 
 __batch processing recursive__
 ```bash
-python evaluation/recursive_parallel_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/bp_dovebench_result --use_audio --parallel_workers 20 --shared_model
+python evaluation/recursive_parallel_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/dovebench_result" --use_audio --parallel_workers 32 --shared_model
 
 ```
+
+
+
+
 
 ## Evaluation(using original repo and windows)
 ``` bash
