@@ -100,9 +100,9 @@ def translate_video(video_path, model_path, source_lang="auto", target_lang="en"
         model.disable_talker()
     
     # Prepare conversation with translation instruction
-    lang_instruction = ""
-    if source_lang != "auto":
-        lang_instruction = f"from {source_lang} "
+    # lang_instruction = ""
+    # if source_lang != "auto":
+    #     lang_instruction = f"from {source_lang} "
     
     # conversation = [
     #     {
@@ -225,11 +225,27 @@ def main():
         # Create output directory
         os.makedirs(args.output_path, exist_ok=True)
         
+        # Initialize counters for statistics
+        skipped_count = 0
+        successful_count = 0
+        failed_count = 0
+        
         # Process each video file
         for i, video_file in enumerate(video_files, 1):
             print(f"\n{'='*60}")
             print(f"Processing file {i}/{len(video_files)}: {os.path.basename(video_file)}")
             print(f"{'='*60}")
+            
+            # Generate output filename based on input filename
+            video_name = Path(video_file).stem
+            output_filename = f"{video_name}.txt"
+            output_path = os.path.join(args.output_path, output_filename)
+            
+            # Check if output file already exists
+            if os.path.exists(output_path):
+                print(f"⏭️  Skipping: Translation file already exists at {output_path}")
+                skipped_count += 1
+                continue
             
             try:
                 translation = translate_video(
@@ -242,25 +258,28 @@ def main():
                     args.use_flash_attn
                 )
                 
-                # Generate output filename based on input filename
-                video_name = Path(video_file).stem
-                output_filename = f"{video_name}.txt"
-                output_path = os.path.join(args.output_path, output_filename)
-                
                 # Save translation to file
                 with open(output_path, "w", encoding="utf-8") as f:
                     f.write(translation)
                 
                 print(f"✓ Translation saved to {output_path}")
                 print(f"Translation preview: {translation[:100]}...")
+                successful_count += 1
                 
             except Exception as e:
                 print(f"✗ Error processing {video_file}: {str(e)}")
+                failed_count += 1
                 continue
         
         print(f"\n{'='*60}")
-        print(f"Batch processing completed!")
-        print(f"Results saved in: {args.output_path}")
+        print(f"BATCH PROCESSING COMPLETED!")
+        print(f"{'='*60}")
+        print(f"📊 Processing Summary:")
+        print(f"  📁 Total files found: {len(video_files)}")
+        print(f"  ⏭️  Files skipped (already exist): {skipped_count}")
+        print(f"  ✅ Files successfully processed: {successful_count}")
+        print(f"  ❌ Files failed to process: {failed_count}")
+        print(f"  📂 Results saved in: {args.output_path}")
         print(f"{'='*60}")
 
 if __name__ == "__main__":
