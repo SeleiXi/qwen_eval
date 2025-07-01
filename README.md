@@ -16,11 +16,24 @@ __Main.py__
 ``` bash
 nohup python evaluation/main.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/output.log --use_audio &
 ```
+``` bash
+nohup python evaluation/main_reverse.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/reverse.log --use_audio &
+```
 
 __Recursive Translate__
 ``` bash
 python evaluation/recursive_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/dovebench_result" --use_audio 
 # nohup会有bug，kill掉所有nohup进程
+```
+
+recursive_translate_optimized
+```bash
+python evaluation/recursive_translate_optimized.py \
+  --input_folder your_videos \
+  --skip_validation \
+  --batch_model_loading \
+  --parallel_validation \
+  --max_duration 10
 ```
 
 
