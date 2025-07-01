@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument("--max_depth", type=int, default=10, help="Maximum recursion depth for subdirectories (default: 10)")
     
     # Video segmentation parameters
-    parser.add_argument("--segment_duration", type=int, default=30, help="Duration of each segment in seconds (default: 30s)")
+    parser.add_argument("--segment_duration", type=int, default=10, help="Duration of each segment in seconds (default: 30s)")
     parser.add_argument("--disable_segmentation", action="store_true", help="Disable automatic video segmentation")
     parser.add_argument("--overlap_duration", type=int, default=2, help="Overlap between segments in seconds (default: 2s)")
     
@@ -146,7 +146,7 @@ def get_video_duration(video_path):
         print(f"⚠️ Warning: Could not get duration for {os.path.basename(video_path)}: {e}")
     return None
 
-def split_video_into_segments(video_path, segment_duration=30, overlap_duration=2):
+def split_video_into_segments(video_path, segment_duration=10, overlap_duration=2):
     """
     Split a video into smaller segments using ffmpeg
     

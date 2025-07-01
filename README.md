@@ -20,7 +20,7 @@ nohup python evaluation/main.py --input_folder "/home/ubuntu/data/BigVideo-test/
 nohup python evaluation/main_reverse.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" > /home/ubuntu/qwen_eval/reverse.log --use_audio &
 ```
 
-Faster Main
+__batch processing Main__
 ```bash
 python evaluation/batch_parallel_translate.py --input_folder "/home/ubuntu/data/BigVideo-test/test" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/result" --shared_model --parallel_workers 10
 ```
@@ -31,16 +31,11 @@ python evaluation/recursive_translate.py --input_folder "/home/ubuntu/data/DoveB
 # nohup会有bug，kill掉所有nohup进程
 ```
 
-recursive_translate_optimized
+__batch processing recursive__
 ```bash
-python evaluation/recursive_translate_optimized.py \
-  --input_folder your_videos \
-  --skip_validation \
-  --batch_model_loading \
-  --parallel_validation \
-  --max_duration 10
-```
+python evaluation/recursive_parallel_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/bp_dovebench_result --use_audio --parallel_workers 20 --shared_model
 
+```
 
 ## Evaluation(using original repo and windows)
 ``` bash
