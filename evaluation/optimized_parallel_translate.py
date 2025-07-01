@@ -177,87 +177,54 @@ class ProgressManager:
                 'remaining': total - completed - failed
             }
 
-class GPUResourceManager:
-    """GPU资源管理器"""
-    
-    def __init__(self, max_concurrent: int = 2):
-        self.semaphore = threading.Semaphore(max_concurrent)
-        self.usage_times = []
-        self.lock = threading.Lock()
-    
-    def acquire(self):
-        """获取GPU资源"""
-        start_time = time.time()
-        self.semaphore.acquire()
-        return start_time
-    
-    def release(self, start_time: float):
-        """释放GPU资源"""
-        gpu_time = time.time() - start_time
-        with self.lock:
-            self.usage_times.append(gpu_time)
-        self.semaphore.release()
-        return gpu_time
+# 全局模型管理 (借鉴batch版本的高效策略)
+_shared_model = None
+_shared_processor = None
+_model_lock = threading.Lock()
+_gpu_semaphore = None
 
-class OptimizedModelManager:
-    """优化的模型管理器"""
+def get_shared_model(model_path: str, use_flash_attn: bool = False, save_audio: bool = False):
+    """
+    获取共享模型实例（线程安全） - 采用batch版本的高效策略
+    """
+    global _shared_model, _shared_processor
     
-    def __init__(self, model_path: str, use_flash_attn: bool = False, save_audio: bool = False):
-        self.model_path = model_path
-        self.use_flash_attn = use_flash_attn
-        self.save_audio = save_audio
-        self._model = None
-        self._processor = None
-        self._model_lock = threading.Lock()
-        self._load_time = 0
-    
-    def get_model(self):
-        """获取模型实例（延迟加载）"""
-        if self._model is None:
-            with self._model_lock:
-                if self._model is None:  # Double-check locking
-                    print(f"🤖 Loading optimized model from {self.model_path}...")
-                    start_time = time.time()
-                    
-                    model_kwargs = {
-                        "torch_dtype": torch.float16,  # 使用半精度加速
-                        "device_map": "auto",
-                        "low_cpu_mem_usage": True,  # 减少CPU内存使用
-                    }
-                    
-                    if self.use_flash_attn:
-                        model_kwargs["attn_implementation"] = "flash_attention_2"
-                    
-                    self._model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-                        self.model_path, **model_kwargs
-                    )
-                    self._processor = Qwen2_5OmniProcessor.from_pretrained(self.model_path)
-                    
-                    if not self.save_audio:
-                        self._model.disable_talker()
-                    
-                    # 模型预热
-                    self._warmup_model()
-                    
-                    self._load_time = time.time() - start_time
-                    print(f"✅ Model loaded in {self._load_time:.2f}s")
-        
-        return self._model, self._processor
-    
-    def _warmup_model(self):
-        """模型预热"""
-        try:
-            print("🔥 Warming up model...")
-            dummy_text = "Hello, this is a warmup."
-            inputs = self._processor(text=dummy_text, return_tensors="pt")
-            inputs = inputs.to(self._model.device)
+    with _model_lock:
+        if _shared_model is None:
+            print(f"🤖 Loading shared model from {model_path}...")
+            start_time = time.time()
             
-            with torch.no_grad():
-                _ = self._model.generate(**inputs, max_new_tokens=5)
+            model_kwargs = {
+                "torch_dtype": "auto",  # 使用auto而不是强制float16，更兼容
+                "device_map": "auto",
+                "low_cpu_mem_usage": True,
+            }
             
-            print("✅ Model warmup completed")
-        except Exception as e:
-            print(f"⚠️ Model warmup failed: {e}")
+            if use_flash_attn:
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+            
+            _shared_model = Qwen2_5OmniForConditionalGeneration.from_pretrained(model_path, **model_kwargs)
+            _shared_processor = Qwen2_5OmniProcessor.from_pretrained(model_path)
+            
+            if not save_audio:
+                _shared_model.disable_talker()
+            
+            # 简化的模型预热
+            try:
+                print("🔥 Warming up model...")
+                dummy_text = "Hello, this is a warmup."
+                inputs = _shared_processor(text=dummy_text, return_tensors="pt")
+                inputs = inputs.to(_shared_model.device)
+                with torch.no_grad():
+                    _ = _shared_model.generate(**inputs, max_new_tokens=5)
+                print("✅ Model warmup completed")
+            except Exception as e:
+                print(f"⚠️ Model warmup failed: {e}")
+            
+            load_time = time.time() - start_time
+            print(f"✅ Shared model loaded in {load_time:.2f}s")
+    
+    return _shared_model, _shared_processor
 
 def calculate_file_hash(file_path: str) -> str:
     """计算文件哈希值用于唯一标识"""
@@ -288,9 +255,11 @@ def get_video_duration_fast(video_path: str) -> Optional[float]:
         pass
     return None
 
-def batch_get_video_info(video_paths: List[str], max_workers: int = 8) -> Dict[str, Dict]:
-    """批量获取视频信息"""
-    print(f"📊 Analyzing {len(video_paths)} videos...")
+def batch_get_video_info(video_paths: List[str], max_workers: int = 16) -> Dict[str, Dict]:
+    """
+    高速批量获取视频信息 - 采用batch版本策略
+    """
+    print(f"📊 Fast analyzing {len(video_paths)} videos...")
     
     def get_single_info(video_path):
         try:
@@ -305,18 +274,52 @@ def batch_get_video_info(video_paths: List[str], max_workers: int = 8) -> Dict[s
             return video_path, {'error': str(e)}
     
     results = {}
+    # 提高并发数以加速信息获取
+    max_workers = min(max_workers, len(video_paths))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(get_single_info, path): path for path in video_paths}
         
+        completed = 0
         for future in as_completed(futures):
             video_path, info = future.result()
             results[video_path] = info
+            completed += 1
+            if completed % 20 == 0:
+                print(f"📊 Analyzed {completed}/{len(video_paths)} videos...")
     
+    print(f"✅ Video analysis completed")
     return results
+
+# 移动到模块级别以避免pickle问题
+def create_video_segment(args_tuple):
+    """创建视频分段的辅助函数"""
+    video_path, temp_dir, segment_count, start_time, end_time, actual_duration = args_tuple
+    
+    segment_filename = f"segment_{segment_count:04d}.mp4"
+    segment_path = os.path.join(temp_dir, segment_filename)
+    
+    cmd = [
+        'ffmpeg', '-y', '-i', video_path,
+        '-ss', str(start_time), '-t', str(actual_duration),
+        '-c:v', 'libx264', '-preset', 'ultrafast',  # 最快编码
+        '-c:a', 'aac', '-avoid_negative_ts', 'make_zero',
+        segment_path
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0 and os.path.exists(segment_path):
+            return (segment_path, start_time, end_time)
+    except Exception as e:
+        print(f"❌ Failed to create segment {segment_count}: {e}")
+    
+    return None
 
 def split_video_optimized(video_path: str, segment_duration: int = 10, 
                          overlap_duration: int = 2) -> Tuple[List[Tuple[str, float, float]], str]:
-    """优化的视频分割"""
+    """
+    优化的视频分割 - 修复pickle问题
+    """
     duration = get_video_duration_fast(video_path)
     if duration is None or duration <= segment_duration:
         return [], ""
@@ -325,7 +328,7 @@ def split_video_optimized(video_path: str, segment_duration: int = 10,
     segments = []
     
     # 计算所有分割点
-    segment_info = []
+    segment_tasks = []
     start_time = 0
     segment_count = 0
     
@@ -336,45 +339,23 @@ def split_video_optimized(video_path: str, segment_duration: int = 10,
         if actual_duration < 2:
             break
         
-        segment_info.append((segment_count, start_time, end_time, actual_duration))
+        # 准备参数元组
+        task_args = (video_path, temp_dir, segment_count, start_time, end_time, actual_duration)
+        segment_tasks.append(task_args)
+        
         start_time = end_time - overlap_duration
         if start_time >= duration - overlap_duration:
             break
         segment_count += 1
     
-    print(f"🔪 Creating {len(segment_info)} segments in parallel...")
+    print(f"🔪 Creating {len(segment_tasks)} segments in parallel...")
     
-    # 并行创建分割
-    def create_segment(info):
-        segment_count, start_time, end_time, actual_duration = info
-        segment_filename = f"segment_{segment_count:04d}.mp4"
-        segment_path = os.path.join(temp_dir, segment_filename)
-        
-        cmd = [
-            'ffmpeg', '-y', '-i', video_path,
-            '-ss', str(start_time), '-t', str(actual_duration),
-            '-c:v', 'libx264', '-preset', 'ultrafast',  # 最快编码
-            '-c:a', 'aac', '-avoid_negative_ts', 'make_zero',
-            segment_path
-        ]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            if result.returncode == 0 and os.path.exists(segment_path):
-                return (segment_path, start_time, end_time)
-        except Exception as e:
-            print(f"❌ Failed to create segment {segment_count}: {e}")
-        
-        return None
-    
-    # 使用进程池并行分割
-    with ProcessPoolExecutor(max_workers=min(4, len(segment_info))) as executor:
-        futures = {executor.submit(create_segment, info): info for info in segment_info}
-        
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                segments.append(result)
+    # 简化：直接串行处理以避免复杂性
+    print(f"🔪 Creating segments sequentially for reliability...")
+    for task_args in segment_tasks:
+        result = create_video_segment(task_args)
+        if result:
+            segments.append(result)
     
     segments.sort(key=lambda x: x[1])  # 按开始时间排序
     print(f"✅ Created {len(segments)} segments successfully")
@@ -383,15 +364,16 @@ def split_video_optimized(video_path: str, segment_duration: int = 10,
 
 
 
-def process_single_video_optimized(task: VideoTask, 
-                                 model_manager: OptimizedModelManager,
-                                 gpu_manager: GPUResourceManager,
-                                 progress_manager: ProgressManager,
-                                 segment_duration: int = 10,
-                                 overlap_duration: int = 2,
-                                 disable_segmentation: bool = False,
-                                 worker_id: int = 0) -> bool:
-    """优化的单视频处理函数"""
+def process_video_task_optimized(task: VideoTask, 
+                                progress_manager: ProgressManager,
+                                segment_duration: int = 10,
+                                overlap_duration: int = 2,
+                                disable_segmentation: bool = False,
+                                use_audio: bool = True,
+                                worker_id: int = 0) -> bool:
+    """
+    高度优化的视频任务处理函数 - 采用batch版本的简洁高效策略
+    """
     
     try:
         start_time = time.time()
@@ -399,31 +381,33 @@ def process_single_video_optimized(task: VideoTask,
                                    status='processing', 
                                    start_time=start_time)
         
-        print(f"🔄 Worker {worker_id}: Processing {os.path.basename(task.video_path)}")
+        print(f"🔄 Worker {worker_id}: Starting {os.path.basename(task.video_path)}")
         
-        # 检查是否需要分割
+        # 检查是否需要分割 - 简化判断逻辑
         should_segment = (not disable_segmentation and 
                          task.duration and 
                          task.duration > segment_duration)
         
-        if not should_segment:
-            # 直接处理整个视频
-            print(f"📹 Worker {worker_id}: Processing video directly")
-            translation = translate_single_video(task.video_path, model_manager, gpu_manager)
+        # 执行翻译 - 使用统一的优化函数
+        if should_segment:
+            print(f"🔪 Worker {worker_id}: Segmenting video ({task.duration:.1f}s)")
+            translation = translate_segmented_video_optimized(
+                task.video_path, segment_duration, overlap_duration, use_audio, worker_id
+            )
+            segments_count = translation.count('\n\n') + 1 if translation else 0
         else:
-            # 分割处理
-            print(f"🔪 Worker {worker_id}: Video requires segmentation ({task.duration:.1f}s)")
-            translation = translate_segmented_video(task.video_path, model_manager, gpu_manager,
-                                                   segment_duration, overlap_duration)
-            task.segments_count = translation.count('\n\n') + 1 if translation else 0
+            print(f"📹 Worker {worker_id}: Processing directly")
+            translation = translate_video_optimized(task.video_path, use_audio, worker_id)
+            segments_count = 0
         
-        # 保存翻译结果
+        # 保存结果 - 简化错误处理
         if translation and translation.strip():
             os.makedirs(os.path.dirname(task.output_path), exist_ok=True)
             
             with open(task.output_path, "w", encoding="utf-8") as f:
                 f.write(translation)
             
+            # 更新状态
             end_time = time.time()
             processing_time = end_time - start_time
             
@@ -431,7 +415,7 @@ def process_single_video_optimized(task: VideoTask,
                                        status='completed',
                                        end_time=end_time,
                                        translation_preview=translation[:200],
-                                       segments_count=getattr(task, 'segments_count', 0))
+                                       segments_count=segments_count)
             
             print(f"✅ Worker {worker_id}: Completed {task.relative_path} in {processing_time:.2f}s")
             return True
@@ -448,101 +432,95 @@ def process_single_video_optimized(task: VideoTask,
                                    end_time=time.time())
         return False
 
-def translate_single_video(video_path: str, model_manager: OptimizedModelManager, 
-                          gpu_manager: GPUResourceManager) -> str:
-    """翻译单个视频"""
-    model, processor = model_manager.get_model()
+def translate_video_optimized(video_path: str, use_audio: bool = True, worker_id: int = 0) -> str:
+    """
+    优化的视频翻译函数 - 借鉴batch版本的高效策略
+    """
+    global _gpu_semaphore, _shared_model, _shared_processor
     
-    conversation = [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}]
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "video", "video": video_path},
-                {"type": "text", "text": "翻译提供的视频中的说话内容到中文。只需要输出翻译内容原文，不要输出任何解释。"}
-            ]
-        }
-    ]
-    
-    gpu_start = gpu_manager.acquire()
     try:
+        print(f"🔄 Worker {worker_id}: Processing {os.path.basename(video_path)}")
+        
+        # 获取共享模型
+        model, processor = _shared_model, _shared_processor
+        
+        # 准备对话
+        conversation = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "video", "video": video_path},
+                    {"type": "text", "text": "翻译提供的视频中的说话内容到中文。只需要输出翻译内容原文，不要输出任何解释。"}
+                ]
+            }
+        ]
+
+        # 处理输入
         text = processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
-        audios, images, videos = process_mm_info(conversation, use_audio_in_video=True)
-        inputs = processor(text=text, audio=audios, images=images, videos=videos,
-                         return_tensors="pt", padding=True, use_audio_in_video=True)
+        audios, images, videos = process_mm_info(conversation, use_audio_in_video=use_audio)
+        inputs = processor(text=text, audio=audios, images=images, videos=videos, 
+                          return_tensors="pt", padding=True, use_audio_in_video=use_audio)
         inputs = inputs.to(model.device).to(model.dtype)
+
+        # GPU并发控制 - 简化版本
+        if _gpu_semaphore:
+            _gpu_semaphore.acquire()
         
-        with torch.no_grad():
-            text_ids = model.generate(**inputs, use_audio_in_video=True,
-                                    return_audio=False, max_new_tokens=512)
+        try:
+            # 生成翻译 - 使用torch.no_grad节省内存
+            with torch.no_grad():
+                text_ids = model.generate(**inputs, use_audio_in_video=use_audio, 
+                                        return_audio=False, max_new_tokens=512)
+        finally:
+            if _gpu_semaphore:
+                _gpu_semaphore.release()
         
-        translation = processor.batch_decode(text_ids, skip_special_tokens=True,
+        # 解码翻译
+        translation = processor.batch_decode(text_ids, skip_special_tokens=True, 
                                            clean_up_tokenization_spaces=False)[0]
+        
+        print(f"✅ Worker {worker_id}: Completed {os.path.basename(video_path)}")
         return translation.strip()
         
-    finally:
-        gpu_manager.release(gpu_start)
+    except Exception as e:
+        print(f"❌ Worker {worker_id}: Error translating {video_path}: {str(e)}")
+        return ""
 
 
-def translate_segmented_video(video_path: str, model_manager: OptimizedModelManager,
-                            gpu_manager: GPUResourceManager, segment_duration: int,
-                            overlap_duration: int) -> str:
-    """翻译分段视频"""
+def translate_segmented_video_optimized(video_path: str, segment_duration: int, 
+                                       overlap_duration: int, use_audio: bool = True, 
+                                       worker_id: int = 0) -> str:
+    """
+    优化的分段视频翻译函数
+    """
     segments, temp_dir = split_video_optimized(video_path, segment_duration, overlap_duration)
     
     try:
         if not segments:
             raise ValueError("Failed to create video segments")
         
-        model, processor = model_manager.get_model()
         translations = []
         
-        # 处理每个分段
+        # 处理每个分段 - 使用统一的翻译函数提高效率
         for i, (segment_path, start_time, end_time) in enumerate(segments):
-            print(f"  🎬 Processing segment {i+1}/{len(segments)}: {start_time:.1f}s - {end_time:.1f}s")
+            print(f"  🎬 Worker {worker_id}: Processing segment {i+1}/{len(segments)}: {start_time:.1f}s - {end_time:.1f}s")
             
-            conversation = [
-                {
-                    "role": "system",
-                    "content": [{"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}]
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "video", "video": segment_path},
-                        {"type": "text", "text": "翻译提供的视频中的说话内容到中文。只需要输出翻译内容原文，不要输出任何解释。"}
-                    ]
-                }
-            ]
+            # 使用统一的翻译函数，减少代码重复
+            translation = translate_video_optimized(segment_path, use_audio, f"{worker_id}.{i+1}")
             
-            gpu_start = gpu_manager.acquire()
-            try:
-                text = processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
-                audios, images, videos = process_mm_info(conversation, use_audio_in_video=True)
-                inputs = processor(text=text, audio=audios, images=images, videos=videos,
-                                 return_tensors="pt", padding=True, use_audio_in_video=True)
-                inputs = inputs.to(model.device).to(model.dtype)
-                
-                with torch.no_grad():
-                    text_ids = model.generate(**inputs, use_audio_in_video=True,
-                                            return_audio=False, max_new_tokens=512)
-                
-                translation = processor.batch_decode(text_ids, skip_special_tokens=True,
-                                                   clean_up_tokenization_spaces=False)[0]
-                
-                if translation and translation.strip():
-                    translations.append(translation.strip())
-                    print(f"    ✅ Segment {i+1} completed: {translation[:50]}...")
-                
-            finally:
-                gpu_manager.release(gpu_start)
+            if translation and translation.strip():
+                translations.append(translation.strip())
+                print(f"    ✅ Segment {i+1} completed: {translation[:50]}...")
         
         # 合并翻译结果
         if translations:
-            return "\n\n".join(translations)
+            combined_result = "\n\n".join(translations)
+            print(f"🎉 Worker {worker_id}: Combined {len(translations)}/{len(segments)} segments")
+            return combined_result
         else:
             raise ValueError("No segments were successfully translated")
             
@@ -601,15 +579,21 @@ def run_optimized_parallel_translation(video_files_info: List[Tuple[str, str]],
                                      parallel_workers: int = 5,
                                      max_concurrent_gpu: int = 2,
                                      use_flash_attn: bool = False,
-                                     save_audio: bool = False) -> Dict:
-    """运行优化的并行翻译"""
+                                     save_audio: bool = False,
+                                     use_audio: bool = True) -> Dict:
+    """
+    运行高度优化的并行翻译 - 采用batch版本的高效架构
+    """
+    global _gpu_semaphore
     
-    # 初始化管理器
+    # 初始化GPU信号量
+    _gpu_semaphore = threading.Semaphore(max_concurrent_gpu)
+    
+    # 预加载共享模型（关键优化）
+    get_shared_model(model_path, use_flash_attn, save_audio)
+    
+    # 初始化进度管理器
     progress_manager = ProgressManager(checkpoint_file)
-    gpu_manager = GPUResourceManager(max_concurrent_gpu)
-    model_manager = OptimizedModelManager(model_path, use_flash_attn, save_audio)
-    
-    # 加载检查点
     progress_manager.load_checkpoint()
     
     # 准备任务列表
@@ -673,15 +657,15 @@ def run_optimized_parallel_translation(video_files_info: List[Tuple[str, str]],
     checkpoint_thread = threading.Thread(target=auto_save_checkpoint, daemon=True)
     checkpoint_thread.start()
     
-    # 并行处理
+    # 高效并行处理 - 借鉴batch版本策略
     with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
         futures = {}
         
         for i, task in enumerate(pending_tasks):
             future = executor.submit(
-                process_single_video_optimized,
-                task, model_manager, gpu_manager, progress_manager,
-                segment_duration, overlap_duration, disable_segmentation, i + 1
+                process_video_task_optimized,
+                task, progress_manager,
+                segment_duration, overlap_duration, disable_segmentation, use_audio, i + 1
             )
             futures[future] = task
         
@@ -786,15 +770,17 @@ def main():
                 duration=duration
             )
             
-            # 初始化管理器
+            # 初始化优化架构
+            global _gpu_semaphore, _shared_model, _shared_processor
+            _gpu_semaphore = threading.Semaphore(1)
+            get_shared_model(args.model_path, args.use_flash_attn, args.save_audio)
             progress_manager = ProgressManager(args.checkpoint_file)
-            gpu_manager = GPUResourceManager(1)
-            model_manager = OptimizedModelManager(args.model_path, args.use_flash_attn, args.save_audio)
             
             # 处理单个视频
-            success = process_single_video_optimized(
-                task, model_manager, gpu_manager, progress_manager,
-                args.segment_duration, args.overlap_duration, args.disable_segmentation, 1
+            success = process_video_task_optimized(
+                task, progress_manager,
+                args.segment_duration, args.overlap_duration, args.disable_segmentation, 
+                args.use_audio, 1
             )
             
             if success:
@@ -816,12 +802,12 @@ def main():
             output_folder = args.output_path or "./evaluation/test_data/optimized_results"
             os.makedirs(output_folder, exist_ok=True)
             
-            # 运行优化的并行翻译
+            # 运行高度优化的并行翻译
             stats = run_optimized_parallel_translation(
                 video_files_info, output_folder, args.model_path, args.checkpoint_file,
                 args.preserve_structure, args.segment_duration, args.overlap_duration,
                 args.disable_segmentation, args.parallel_workers, args.max_concurrent_gpu,
-                args.use_flash_attn, args.save_audio
+                args.use_flash_attn, args.save_audio, args.use_audio
             )
             
             print(f"🎯 Final Results: {stats}")
