@@ -42,6 +42,7 @@ __batch processing recursive__
 ```bash
 python evaluation/recursive_parallel_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/dovebench_result" --use_audio --parallel_workers 32 --shared_model
 
+nohup python evaluation/recursive_parallel_translate.py --input_folder "/home/ubuntu/data/DoveBench" --output_path "/home/ubuntu/qwen_eval/evaluation/test_data/dovebench_result" --use_audio --parallel_workers 32 --shared_model &
 ```
 
 ## ✨ 性能优化版本 (推荐) 
@@ -93,6 +94,7 @@ python evaluation/optimized_parallel_translate.py \
 scp -r ...@...:/home/ubuntu/qwen_eval/evaluation/test_data/result C:\TEMP2\coding\0_Recent\vidove\ViDove\evaluation\test_data\qwen_results
 cd C:\TEMP2\coding\0_Recent\vidove\ViDove
 python evaluation/generate_eval_result.py
+python evaluation/utils/identify_dirty_data.py
 python evaluation/evaluate.py # 获得一个qwen_result.csv
 python evaluation/utils/cal_avg_scores_from_results.py
 ```

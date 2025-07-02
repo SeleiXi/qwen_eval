@@ -202,27 +202,22 @@ def get_shared_model(model_path: str, use_flash_attn: bool = False, save_audio: 
             
             if use_flash_attn:
                 model_kwargs["attn_implementation"] = "flash_attention_2"
+                print("⚡ Using Flash Attention 2")
             
+            print("📦 Loading model weights...")
             _shared_model = Qwen2_5OmniForConditionalGeneration.from_pretrained(model_path, **model_kwargs)
+            
+            print("📦 Loading processor...")
             _shared_processor = Qwen2_5OmniProcessor.from_pretrained(model_path)
             
             if not save_audio:
+                print("🔇 Disabling audio output...")
                 _shared_model.disable_talker()
             
-            # 简化的模型预热
-            try:
-                print("🔥 Warming up model...")
-                dummy_text = "Hello, this is a warmup."
-                inputs = _shared_processor(text=dummy_text, return_tensors="pt")
-                inputs = inputs.to(_shared_model.device)
-                with torch.no_grad():
-                    _ = _shared_model.generate(**inputs, max_new_tokens=5)
-                print("✅ Model warmup completed")
-            except Exception as e:
-                print(f"⚠️ Model warmup failed: {e}")
+            print("✅ Model loaded successfully, ready for processing")
             
             load_time = time.time() - start_time
-            print(f"✅ Shared model loaded in {load_time:.2f}s")
+            print(f"⏱️ Total model loading time: {load_time:.2f}s")
     
     return _shared_model, _shared_processor
 
